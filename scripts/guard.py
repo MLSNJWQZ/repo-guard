@@ -58,13 +58,30 @@ TOKEN = (os.environ.get("GH_PAT") or "").strip()
 OWNER = (os.environ.get("GH_OWNER") or "").strip()
 REPO_ENV = os.environ.get("GITHUB_REPOSITORY") or ""
 SELF_REPO = REPO_ENV.split("/")[-1] if REPO_ENV else "repo-guard"
+
+
+def _self_workflow_file():
+    """自动认出「我自己这个 workflow 文件叫什么」。
+    优先用 GITHUB_WORKFLOW_REF（形如 owner/repo/.github/workflows/guard.yml@refs/heads/main），
+    这样 fork 的人改了文件名，自监控也不会瞎。"""
+    ref = (os.environ.get("GITHUB_WORKFLOW_REF") or "").split("@")[0]
+    if not ref:
+        return "guard.yml"
+    marker = f"/{SELF_REPO}/"
+    if marker in ref:
+        return ref.split(marker, 1)[1]
+    return ref.rsplit("/", 1)[-1]
+
+
+SELF_WF = _self_workflow_file()
 OUT_DIR = os.environ.get("GH_OUT_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 MODE = "pat" if TOKEN else "anon"
 ANON_BUDGET = 55  # 未认证每小时 60 次，留 5 次余量
 
 # 关键产物新鲜度：仓库 -> [(路径, 最大陈旧小时, 说明)]
-# 这是唯一的「个性化」配置项，fork 的人可自行增删。
+# 这是唯一的「个性化」配置项：键是**仓库名**，fork 后别人的仓库名对不上，
+# 这段就是空的（不报错、不误报，只是不做产物新鲜度这一项）。要用自己加。
 # 选「每天都会变的文件」，不要选配置类文件（那种几十天不变是正常的）
 ARTIFACTS = {
     "db-sync": [("db.json", 96, "站点库")],
@@ -212,7 +229,7 @@ def list_repos():
             path = f"/users/{OWNER}/repos?per_page=100&page={page}&sort=pushed"
         chunk = api(path)
         if not ok(chunk):
-            raise SystemExit(f"列出仓库失败：{chunk.get('_error') if isinstance(chunk, dict) else chunk}")
+            raise RuntimeError(f"列出仓库失败：{chunk.get('_error') if isinstance(chunk, dict) else chunk}")
         if not chunk:
             break
         repos.extend(chunk)
@@ -379,7 +396,10 @@ def check_artifact(repo, path, max_age_h, label):
 
 
 def self_check():
-    runs = api(f"/repos/{OWNER}/{SELF_REPO}/actions/workflows/guard.yml/runs?per_page=5")
+    # 注意 safe=""：quote 默认放行 "/"，而未编码的 ".github/workflows/x.yml" 实测返回 404，
+    # 把斜杠编码成 %2F 才是 200（GitHub 的 router 会按斜杠切路径）。用裸文件名也能命中，
+    # 但那样改文件名就失效了，所以这里用完整路径 + 强制编码。
+    runs = api(f"/repos/{OWNER}/{SELF_REPO}/actions/workflows/{parse.quote(SELF_WF, safe='')}/runs?per_page=5")
     if not ok(runs) or not runs.get("workflow_runs"):
         return {"status": "WARN", "age_h": None, "notes": ["读不到自身运行记录"]}
     # 只取已完成的，否则会读到「正在跑的这一轮」，结论永远是空的
@@ -516,12 +536,67 @@ def build_report(results, artifacts, heal_summary=None):
     return "\n".join(blocks)
 
 
+def build_degraded_status(reason, hint):
+    """巡检自己没跑起来（多半是 API 限额）时的看板。
+    关键是别让人误以为是仓库坏了，也别让 workflow 一片空白。"""
+    t = now_utc()
+    mode_desc = "🔓 PAT 模式" if MODE == "pat" else "⚠️ 匿名模式"
+    L = [
+        "# 仓库巡检看板\n",
+        f"> 最后尝试：**{t.strftime('%Y-%m-%d %H:%M')} UTC**",
+        f"> 模式：{mode_desc}",
+        "",
+        "## 总览：⚫ 本轮未完成\n",
+        f"原因：`{reason}`\n",
+        hint,
+        "",
+        "---",
+        "> 这一轮**不算任何仓库的故障**——是巡检自己的请求被拦下了，下一轮会自动重试。"
+        "本文件由 `scripts/guard.py` 自动生成，勿手改。",
+    ]
+    return "\n".join(L) + "\n"
+
+
 # ---------------------------------------------------------------- main
 def main():
     if not OWNER:
-        raise SystemExit("缺少 GH_OWNER 环境变量")
+        raise SystemExit("缺少 GH_OWNER 环境变量（workflow 里应传 ${{ github.repository_owner }}）")
 
-    repos = list_repos()
+    try:
+        repos = list_repos()
+    except RuntimeError as e:
+        reason = str(e)
+        if MODE == "anon":
+            hint = (
+                "**匿名模式每小时只有 60 次额度，而且是按出口 IP 算的** —— 共享网络"
+                "（公司出口、代理池、CI 共享 IP）很容易被别人先耗光。\n\n"
+                "解决办法（任选）：\n"
+                "1. 给本仓库加 `GH_PAT` secret（经典 PAT 勾 `repo` + `workflow`）→ "
+                "额度升到 5000 次/小时，并能覆盖私有仓库；\n"
+                "2. 等一小时后再手动跑一次。\n"
+            )
+        else:
+            hint = (
+                "PAT 模式仍失败，通常是 **token 过期 / 权限不足 / GitHub 临时故障**。\n\n"
+                "检查：PAT 是否勾了 `repo`（或细粒度 token 的 Administration/Actions/Contents 只读）"
+                "、是否已过期、`GH_PAT` secret 是否写错。\n"
+            )
+        md = build_degraded_status(reason, hint)
+        os.makedirs(OUT_DIR, exist_ok=True)
+        with open(os.path.join(OUT_DIR, "STATUS.md"), "w", encoding="utf-8") as f:
+            f.write(md)
+        print(md)
+        # 清掉上一轮遗留的报告，否则 workflow 会拿旧报告反复开 Issue
+        stale = os.path.join(OUT_DIR, "guard_report.md")
+        if os.path.exists(stale):
+            os.remove(stale)
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a", encoding="utf-8") as f:
+                f.write(md)
+        # 匿名模式限额用尽是环境问题，不是仓库故障：不标红，免得刷一堆假告警
+        return 0 if MODE == "anon" else 1
+
     results, artifacts = [], []
     wf_total = 0
     wf_jobs, art_jobs = [], []

@@ -72,6 +72,20 @@
 3. 名字填 `GH_PAT`，值贴 token
 4. 重跑 workflow，看板顶部会变成「🔓 PAT 模式」
 
+## fork 之后到底要改什么
+
+**代码一行都不用改。** 账号名、仓库名、自身 workflow 文件名全是自动识别的（`github.repository_owner` / `GITHUB_REPOSITORY` / `GITHUB_WORKFLOW_REF`），你把仓库改名叫什么都行。
+
+但**「零改代码」不等于「零操作」**，有三件事得做，全在网页上点：
+
+| 要做的事 | 为什么 | 不做会怎样 |
+|---|---|---|
+| **Actions 页点 `I understand my workflows, go ahead and re-enable them`** | GitHub 默认禁用 fork 仓库的 schedule | 一次都不会定时跑，而且状态栏仍显示 `active`，你会以为它在跑 |
+| **加 `GH_PAT` secret（强烈建议）** | 匿名模式 60 次/小时，而且是**按出口 IP** 算的，共享网络很容易被别人耗光 | 只扫公开仓库；限额用尽时看板显示「⚫ 本轮未完成」并直接给出解决办法（不会误报成仓库故障） |
+| 可选：设仓库变量 `FIX_LEVEL` | 自愈档位，默认 `off` | 只报告，不自动修 |
+
+唯一残留的「个性化」是 `ARTIFACTS`（盯哪些关键文件不更新），键是**仓库名**。别人的仓库名对不上就是空操作——不报错、不误报，只是不做这一项。想用就自己往里加一行。
+
 ## 看板长什么样
 
 ```markdown
