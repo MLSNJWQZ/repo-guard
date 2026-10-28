@@ -106,4 +106,6 @@ Windows / 沙箱环境如果设了 `http_proxy`，urllib 可能被代理隧道�
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 MLSNJWQZ
+
+可自由使用、修改、再分发、商用，只需保留版权声明；作者不对使用后果承担责任。
