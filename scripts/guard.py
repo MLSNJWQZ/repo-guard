@@ -38,7 +38,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib import parse, request, error
 
@@ -53,10 +55,18 @@ MODE = "pat" if TOKEN else "anon"
 ANON_BUDGET = 55  # 未认证每小时 60 次，留 5 次余量
 
 # 关键产物新鲜度：仓库 -> [(路径, 最大陈旧小时, 说明)]
-# 这是唯一的「个性化」配置项，fork 的人可自行增删
+# 这是唯一的「个性化」配置项，fork 的人可自行增删。
+# 选「每天都会变的文件」，不要选配置类文件（那种几十天不变是正常的）
 ARTIFACTS = {
-    "db-sync": [("feeds.txt", 96, "采集源清单")],
+    "db-sync": [("db.json", 96, "站点库")],
     "dongguaTV": [("db.json", 96, "站点库")],
+}
+
+# 这些 workflow state 属于「按预期不运行」，不算故障
+BENIGN_STATES = {
+    "disabled_manually": "手动禁用",
+    "disabled_fork": "fork 默认禁用",
+    "deleted": "已删除",
 }
 
 # 特例覆盖：实际周期与 cron 不符时按小时强行指定，键为 "仓库名/工作流名"
@@ -64,6 +74,15 @@ PERIOD_OVERRIDE = {}
 
 SKIPPED = []
 REQ_COUNT = 0
+_REQ_LOCK = threading.Lock()
+
+# 默认忽略 http_proxy / https_proxy 环境变量直连 GitHub。
+# 原因：某些沙箱/公司代理会让 urllib 的 CONNECT 隧道卡死，而 curl 走同一代理却正常。
+# 确实需要走代理时，设 GH_USE_PROXY=1。
+if os.environ.get("GH_USE_PROXY") == "1":
+    OPENER = request.build_opener()
+else:
+    OPENER = request.build_opener(request.ProxyHandler({}))
 
 
 # ---------------------------------------------------------------- HTTP
@@ -81,9 +100,10 @@ def api(path, method="GET", payload=None):
 
     req = request.Request(url, data=data, method=method, headers=headers)
     for attempt in range(3):
-        REQ_COUNT += 1
+        with _REQ_LOCK:
+            REQ_COUNT += 1
         try:
-            with request.urlopen(req, timeout=30) as r:
+            with OPENER.open(req, timeout=30) as r:
                 raw = r.read()
                 return json.loads(raw) if raw else {}
         except error.HTTPError as e:
@@ -198,6 +218,16 @@ def check_workflow(repo, wf):
     state = wf.get("state") or "unknown"
     wf_id = wf.get("id")
     path = wf.get("path") or ""
+    if os.environ.get("GH_VERBOSE") == "1":
+        print(f"[req {REQ_COUNT}] {repo} / {name} (state={state})", file=sys.stderr, flush=True)
+
+    # 手动禁用 / fork 默认禁用 / 已删除：按预期不运行，直接跳过，不消耗请求
+    if state in BENIGN_STATES:
+        return {
+            "repo": repo, "workflow": name, "status": "SKIP", "cron": None,
+            "period": "—", "last": None, "age_h": None, "conclusion": None,
+            "notes": [f"workflow 状态 `{state}`（{BENIGN_STATES[state]}）"],
+        }
 
     cron = None
     if path:
@@ -208,7 +238,7 @@ def check_workflow(repo, wf):
             except Exception:  # noqa: BLE001
                 cron = None
 
-    runs = api(f"/repos/{OWNER}/{repo}/actions/workflows/{wf_id}/runs?per_page=10")
+    runs = api(f"/repos/{OWNER}/{repo}/actions/workflows/{wf_id}/runs?per_page=30")
     if not ok(runs):
         return {
             "repo": repo, "workflow": name, "status": "WARN", "cron": cron,
@@ -229,10 +259,28 @@ def check_workflow(repo, wf):
 
     if state != "active":
         level = "FAIL"
-        notes.append(f"workflow 状态为 `{state}`（已被禁用）")
+        notes.append(f"workflow 状态为 `{state}`（非 active，需人工确认）")
 
     if not run_list:
-        notes.append("没有任何运行记录")
+        # 无定时器 = 纯手动/推送触发，从未运行是正常的
+        if not period:
+            return {
+                "repo": repo, "workflow": name, "status": "SKIP", "cron": cron,
+                "period": period_desc, "last": None, "age_h": None, "conclusion": None,
+                "notes": ["无定时器且从未运行（纯手动触发）"],
+            }
+        # 有定时器但没记录：可能刚建，还没到第一次触发时间
+        tolerance = max(2 * period, period + 6)
+        created = parse_dt(wf.get("created_at"))
+        if created:
+            since_create = (now_utc() - created).total_seconds() / 3600
+            if since_create <= tolerance:
+                return {
+                    "repo": repo, "workflow": name, "status": "SKIP", "cron": cron,
+                    "period": period_desc, "last": None, "age_h": None, "conclusion": None,
+                    "notes": [f"新建 {human_age(since_create)}，尚未到首个触发周期（容忍 {tolerance:.0f}h）"],
+                }
+        notes.append("配置了定时器但从未运行过")
         return {
             "repo": repo, "workflow": name, "status": "FAIL", "cron": cron,
             "period": period_desc, "last": None, "age_h": None, "conclusion": None,
@@ -243,12 +291,27 @@ def check_workflow(repo, wf):
     last_dt = parse_dt(latest.get("created_at"))
     age_h = (now_utc() - last_dt).total_seconds() / 3600 if last_dt else None
 
-    if period and age_h is not None:
+    # 停摆判定只看 schedule 触发的运行。
+    # 手动触发（workflow_dispatch）不能算数——否则每周手点一次就能掩盖定时任务已死。
+    sched_runs = [r for r in run_list if (r.get("event") or "") == "schedule"]
+    last_sched_dt = parse_dt(sched_runs[0].get("created_at")) if sched_runs else None
+    sched_age_h = (
+        (now_utc() - last_sched_dt).total_seconds() / 3600 if last_sched_dt else None
+    )
+
+    if period:
         tolerance = max(2 * period, period + 6)
-        if age_h > tolerance:
+        if not sched_runs:
             level = "FAIL"
             notes.append(
-                f"{human_age(age_h)} 未触发（预期{period_desc}，容忍 {tolerance:.0f}h）→ 疑似被 GitHub 静默停用"
+                f"有{period_desc}的定时器，但最近 {len(run_list)} 次运行中**没有一次由 schedule 触发**"
+                "（只有手动/推送触发）→ 定时任务没在工作"
+            )
+        elif sched_age_h is not None and sched_age_h > tolerance:
+            level = "FAIL"
+            notes.append(
+                f"上次定时触发是 {human_age(sched_age_h)}前（预期{period_desc}，容忍 {tolerance:.0f}h）"
+                "→ 疑似被 GitHub 静默停用"
             )
 
     consec = 0
@@ -274,7 +337,10 @@ def check_workflow(repo, wf):
     return {
         "repo": repo, "workflow": name, "status": level, "cron": cron,
         "period": period_desc, "last": last_dt, "age_h": age_h,
-        "conclusion": latest.get("conclusion"), "event": latest.get("event"),
+        "last_sched": last_sched_dt, "sched_age_h": sched_age_h,
+        # 结论优先取最近一次定时触发的结果，避免手动成功掩盖定时失败
+        "conclusion": (sched_runs[0].get("conclusion") if sched_runs else latest.get("conclusion")),
+        "event": latest.get("event"),
         "notes": notes,
     }
 
@@ -327,19 +393,26 @@ def build_status(results, artifacts, selfinfo, repo_count, wf_count):
     n_fail = sum(1 for x in results if x["status"] == "FAIL")
     n_warn = sum(1 for x in results if x["status"] == "WARN")
     n_ok = sum(1 for x in results if x["status"] == "OK")
+    n_skip = sum(1 for x in results if x["status"] == "SKIP")
     badge = f"🔴 有 {n_fail} 项异常" if n_fail else (f"🟡 {n_warn} 项需留意" if n_warn else "🟢 全部正常")
     L.append(f"## 总览：{badge}\n")
-    L.append(f"🟢 正常 {n_ok} ｜ 🟡 留意 {n_warn} ｜ 🔴 异常 {n_fail}\n")
+    L.append(f"🟢 正常 {n_ok} ｜ 🟡 留意 {n_warn} ｜ 🔴 异常 {n_fail} ｜ ⚪ 跳过 {n_skip}\n")
+    if n_skip:
+        L.append(
+            "> ⚪ 跳过＝按预期不运行，不算故障：手动禁用的、fork 仓库默认禁用的、"
+            "纯手动触发从未跑过的、以及刚建还没到首个触发周期的。\n"
+        )
 
     icon = {"OK": "🟢", "WARN": "🟡", "FAIL": "🔴", "SKIP": "⚪"}
 
     if n_fail or n_warn:
         L.append("## 需要处理\n")
-        L.append("| 级别 | 仓库 | 工作流 / 文件 | 最后运行 | 周期 | 说明 |")
+        L.append("| 级别 | 仓库 | 工作流 / 文件 | 最后定时触发 | 周期 | 说明 |")
         L.append("|---|---|---|---|---|---|")
         for x in results:
             if x["status"] in ("FAIL", "WARN"):
-                last = x["last"].strftime("%m-%d %H:%M") if x.get("last") else "—"
+                lt = x.get("last_sched") or x.get("last")
+                last = lt.strftime("%m-%d %H:%M") if lt else "—"
                 L.append(
                     f"| {icon[x['status']]} | `{x['repo']}` | {x['workflow']} | {last} "
                     f"| {x.get('period') or '—'} | {'；'.join(x['notes'])} |"
@@ -354,13 +427,15 @@ def build_status(results, artifacts, selfinfo, repo_count, wf_count):
         L.append("")
 
     L.append("## 全部工作流\n")
-    L.append("| | 仓库 | 工作流 | 周期 | 最后运行 | 距今 | 最近结论 |")
+    L.append("| | 仓库 | 工作流 | 周期 | 最后定时触发 | 距今 | 最近结论 |")
     L.append("|---|---|---|---|---|---|---|")
     for x in sorted(results, key=lambda r: (r["status"] != "FAIL", r["status"] != "WARN", r["repo"])):
-        last = x["last"].strftime("%m-%d %H:%M") if x.get("last") else "—"
+        lt = x.get("last_sched") or x.get("last")
+        last = lt.strftime("%m-%d %H:%M") if lt else "—"
+        age = x.get("sched_age_h") if x.get("last_sched") else x.get("age_h")
         L.append(
             f"| {icon[x['status']]} | `{x['repo']}` | {x['workflow']} | {x.get('period') or '—'} "
-            f"| {last} | {human_age(x.get('age_h'))} | `{x.get('conclusion') or '—'}` |"
+            f"| {last} | {human_age(age)} | `{x.get('conclusion') or '—'}` |"
         )
     L.append("")
 
@@ -394,11 +469,13 @@ def build_report(results, artifacts):
     blocks = []
     for x in results:
         if x["status"] in ("FAIL", "WARN"):
-            last = x["last"].strftime("%Y-%m-%d %H:%M UTC") if x.get("last") else "从未运行"
+            lt = x.get("last_sched") or x.get("last")
+            last = lt.strftime("%Y-%m-%d %H:%M UTC") if lt else "从未运行"
+            age = x.get("sched_age_h") if x.get("last_sched") else x.get("age_h")
             blocks.append(
                 f"### {x['repo']} / {x['workflow']}\n"
                 f"- 级别：{'🔴 异常' if x['status'] == 'FAIL' else '🟡 留意'}\n"
-                f"- 最后运行：{last}（{human_age(x.get('age_h'))}前）\n"
+                f"- 最后定时触发：{last}（{human_age(age)}前）\n"
                 f"- 预期周期：{x.get('period') or '—'}\n"
                 f"- 问题：{'；'.join(x['notes'])}\n"
             )
@@ -422,7 +499,9 @@ def main():
     repos = list_repos()
     results, artifacts = [], []
     wf_total = 0
+    wf_jobs, art_jobs = [], []
 
+    # 第一遍：串行列出每个仓库的 workflow（请求少，且要先知道有哪些）
     for repo in repos:
         rname = repo.get("name")
         if rname == SELF_REPO:
@@ -449,16 +528,16 @@ def main():
             continue
 
         for wf in wf_list:
-            if MODE == "anon" and REQ_COUNT >= ANON_BUDGET:
-                SKIPPED.append({"repo": rname, "why": "匿名模式请求预算用尽，工作流未全查"})
-                break
             wf_total += 1
-            results.append(check_workflow(rname, wf))
+            wf_jobs.append((rname, wf))
+        for path_, max_h, label in ARTIFACTS.get(rname, []):
+            art_jobs.append((rname, path_, max_h, label))
 
-        for path, max_h, label in ARTIFACTS.get(rname, []):
-            if MODE == "anon" and REQ_COUNT >= ANON_BUDGET:
-                break
-            artifacts.append(check_artifact(rname, path, max_h, label))
+    # 第二遍：并发检查。串行时 35 个请求 × 2-3 秒会超过 2 分钟，并发后十几秒完成。
+    workers = min(8, max(len(wf_jobs) + len(art_jobs), 1))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results.extend(ex.map(lambda j: check_workflow(*j), wf_jobs))
+        artifacts.extend(ex.map(lambda a: check_artifact(*a), art_jobs))
 
     selfinfo = self_check()
     status_md = build_status(results, artifacts, selfinfo, len(repos), wf_total)
