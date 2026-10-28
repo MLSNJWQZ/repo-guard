@@ -2,6 +2,8 @@
 
 自动巡检**你名下所有仓库**的 GitHub Actions 健康度。不用维护监控名单——加新仓库、加新 workflow，下次巡检自动发现。
 
+> 🚀 **最快用法**：仓库页右上角 **`Use this template` → `Create a new repository`**，建完就不用管了。不要用 Fork——见[为什么](#怎么用)。
+
 > 中文名「仓库哨兵」：`repo` = repository（仓库），`guard` = 守卫。GitHub 不允许仓库名用中文，所以英文链接名固定为 `repo-guard`，中文标识放在这里和仓库简介里。
 
 ## 它能抓什么
@@ -51,40 +53,42 @@
 
 ## 怎么用
 
-### 方式一：fork 后直接用（覆盖公开仓库，零配置）
+**最快路径是「Use this template」，不是 Fork。** 差别只有一点，但很致命：GitHub 官方文档写明「public 仓库被 fork 时，**scheduled workflow 默认被禁用**」；用模板创建是文件拷贝，不受这条限制。
 
-1. Fork 这个仓库
-2. **到 Actions 页面点 `I understand my workflows, go ahead and re-enable them`** ← 这步不能省，见下方警告
-3. 进 `Repo Guard - 全仓库巡检` → `Run workflow` 手动跑一次
+### 方式一（推荐）：Use this template —— 建完就完事
 
-账号名会自动从 `github.repository_owner` 取，**不需要改任何代码**。
+1. 仓库页右上角 **`Use this template` → `Create a new repository`**
+2. 结束。不用改代码、不用配 secret、不用点任何按钮
 
-> ⚠️ **fork 后必做第 2 步**：GitHub 默认禁用 fork 仓库的定时任务，而且**状态栏仍然显示 active**，只有 Actions 页面顶部有那条按钮。不点的话你会以为它在跑，其实一次都不会触发。这个坑我自己就踩过——一个 fork 来的仓库停摆了 7 天才被发现。
+第一次巡检会在建仓时的 push 事件里自动跑，之后每 6 小时一次，看板自动提交到 `STATUS.md`。
+（万一 Actions 页仍提示要 enable——偶发——点一次就行。）
 
-### 方式二：覆盖私有仓库（需要 PAT）
+### 方式二：Fork
 
-匿名 API 每小时只有 60 次额度，且读不到私有仓库。想全量覆盖：
+fork 同样零改代码，但**必须手动点一次**：
+
+1. Fork
+2. 到 Actions 页点 `I understand my workflows, go ahead and re-enable them` ← 不能省
+3. 进 `Repo Guard - 全仓库巡检` → `Run workflow` 跑一次
+
+> ⚠️ 为什么 fork 必须点这一步：GitHub 默认禁用 fork 仓库的定时任务，而且**状态栏仍然显示 active**，只有 Actions 页顶部有那条按钮。不点的话你会以为它在跑，其实一次都不会触发。这个坑我自己就踩过——一个 fork 来的仓库停摆了 7 天才被发现。
+
+### 可选：覆盖私有仓库 / 提高额度
+
+上面两种**不配任何东西就能跑**，代价是：只扫公开仓库 + 每小时 60 次请求（按出口 IP 算，共享网络可能被别人耗光）。想把私有仓库也纳入、额度提到 5000 次/小时：
 
 1. 生成 token（两选一）
-   - 经典 PAT：Settings → Developer settings → Personal access tokens → Tokens (classic)，勾选 **`repo`** + **`workflow`**
-   - 细粒度 PAT：只读权限即可 —— **Administration: Read**、**Actions: Read**、**Contents: Read**，Repository access 选 **All repositories**
+   - 经典 PAT：Settings → Developer settings → Personal access tokens → Tokens (classic)，勾 **`repo`** + **`workflow`**
+   - 细粒度 PAT：只读即可 —— **Administration: Read**、**Actions: Read**、**Contents: Read**，Repository access 选 **All repositories**
 2. 本仓库 Settings → Secrets and variables → Actions → New repository secret
 3. 名字填 `GH_PAT`，值贴 token
-4. 重跑 workflow，看板顶部会变成「🔓 PAT 模式」
+4. 重跑一次，看板顶部会变成「🔓 PAT 模式」
 
-## fork 之后到底要改什么
+### 为什么能做到「不用改」
 
-**代码一行都不用改。** 账号名、仓库名、自身 workflow 文件名全是自动识别的（`github.repository_owner` / `GITHUB_REPOSITORY` / `GITHUB_WORKFLOW_REF`），你把仓库改名叫什么都行。
+账号名、仓库名、连它自己这个 workflow 文件叫什么，全都是自动识别的（`github.repository_owner` / `GITHUB_REPOSITORY` / `GITHUB_WORKFLOW_REF`）。仓库你想改名叫什么都行，代码一行不用动。
 
-但**「零改代码」不等于「零操作」**，有三件事得做，全在网页上点：
-
-| 要做的事 | 为什么 | 不做会怎样 |
-|---|---|---|
-| **Actions 页点 `I understand my workflows, go ahead and re-enable them`** | GitHub 默认禁用 fork 仓库的 schedule | 一次都不会定时跑，而且状态栏仍显示 `active`，你会以为它在跑 |
-| **加 `GH_PAT` secret（强烈建议）** | 匿名模式 60 次/小时，而且是**按出口 IP** 算的，共享网络很容易被别人耗光 | 只扫公开仓库；限额用尽时看板显示「⚫ 本轮未完成」并直接给出解决办法（不会误报成仓库故障） |
-| 可选：设仓库变量 `FIX_LEVEL` | 自愈档位，默认 `off` | 只报告，不自动修 |
-
-唯一残留的「个性化」是 `ARTIFACTS`（盯哪些关键文件不更新），键是**仓库名**。别人的仓库名对不上就是空操作——不报错、不误报，只是不做这一项。想用就自己往里加一行。
+唯一残留的「个性化」是 `ARTIFACTS`（盯哪些关键文件不更新），键是**仓库名**。别人的仓库名对不上就是空操作——不报错、不误报，只是不做这一项。想用自己加一行。
 
 ## 看板长什么样
 

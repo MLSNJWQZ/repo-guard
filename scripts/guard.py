@@ -423,7 +423,8 @@ def build_status(results, artifacts, selfinfo, repo_count, wf_count, heal_summar
     mode_desc = (
         "🔓 **PAT 模式**：覆盖全部仓库（含私有）"
         if MODE == "pat"
-        else "⚠️ **匿名模式**：仅覆盖公开仓库，未认证限额 60 次/小时"
+        else "⚠️ **匿名模式**：只覆盖公开仓库，限额 60 次/小时（按出口 IP 算，共享网络可能被别人耗光）"
+        "。想让看板覆盖私有仓库、额度提到 5000 次/小时 → 加一个 `GH_PAT` secret（可选，不配也能跑）"
     )
     L.append(f"> 模式：{mode_desc}")
     L.append(f"> 覆盖：**{repo_count}** 个仓库 / **{wf_count}** 个 workflow ｜ 本次请求 {REQ_COUNT} 次\n")
