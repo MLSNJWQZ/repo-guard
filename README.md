@@ -60,8 +60,8 @@
 1. 仓库页右上角 **`Use this template` → `Create a new repository`**
 2. 结束。不用改代码、不用配 secret、不用点任何按钮
 
-第一次巡检会在建仓时的 push 事件里自动跑，之后每 6 小时一次，看板自动提交到 `STATUS.md`。
-（万一 Actions 页仍提示要 enable——偶发——点一次就行。）
+第一次巡检最迟在下个 cron 点（6 小时内）自动跑；想立刻看到结果，到 Actions 页点一次 `Run workflow`（可选，纯粹为了马上看效果）。
+（万一 Actions 页提示要 enable——偶发——点一次就行。）
 
 ### 方式二：Fork
 
