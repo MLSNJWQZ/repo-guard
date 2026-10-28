@@ -45,6 +45,15 @@ from datetime import datetime, timezone
 from urllib import parse, request, error
 
 API = "https://api.github.com"
+
+# 自愈模块与巡检器同目录。加载失败不影响巡检（只是没有自愈能力）。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import heal  # noqa: E402
+except Exception as _heal_err:  # noqa: BLE001
+    heal = None
+    print(f"[heal] 无法加载自愈模块：{_heal_err}", file=sys.stderr)
+
 TOKEN = (os.environ.get("GH_PAT") or "").strip()
 OWNER = (os.environ.get("GH_OWNER") or "").strip()
 REPO_ENV = os.environ.get("GITHUB_REPOSITORY") or ""
@@ -249,6 +258,7 @@ def check_workflow(repo, wf):
     run_list = list(runs.get("workflow_runs") or [])
     notes = []
     level = "OK"
+    stalled = False  # 定时器挂着却不触发：自愈模块据此决定是否重置
 
     period, period_desc = None, "无定时器"
     if cron:
@@ -284,6 +294,7 @@ def check_workflow(repo, wf):
         return {
             "repo": repo, "workflow": name, "status": "FAIL", "cron": cron,
             "period": period_desc, "last": None, "age_h": None, "conclusion": None,
+            "wf_id": wf_id, "state": state, "stalled": False,
             "notes": notes,
         }
 
@@ -303,12 +314,14 @@ def check_workflow(repo, wf):
         tolerance = max(2 * period, period + 6)
         if not sched_runs:
             level = "FAIL"
+            stalled = True
             notes.append(
                 f"有{period_desc}的定时器，但最近 {len(run_list)} 次运行中**没有一次由 schedule 触发**"
                 "（只有手动/推送触发）→ 定时任务没在工作"
             )
         elif sched_age_h is not None and sched_age_h > tolerance:
             level = "FAIL"
+            stalled = True
             notes.append(
                 f"上次定时触发是 {human_age(sched_age_h)}前（预期{period_desc}，容忍 {tolerance:.0f}h）"
                 "→ 疑似被 GitHub 静默停用"
@@ -341,6 +354,7 @@ def check_workflow(repo, wf):
         # 结论优先取最近一次定时触发的结果，避免手动成功掩盖定时失败
         "conclusion": (sched_runs[0].get("conclusion") if sched_runs else latest.get("conclusion")),
         "event": latest.get("event"),
+        "wf_id": wf_id, "state": state, "stalled": stalled,
         "notes": notes,
     }
 
@@ -379,7 +393,7 @@ def self_check():
 
 
 # ---------------------------------------------------------------- 输出
-def build_status(results, artifacts, selfinfo, repo_count, wf_count):
+def build_status(results, artifacts, selfinfo, repo_count, wf_count, heal_summary=None):
     t = now_utc()
     L = []
     L.append("# 仓库巡检看板\n")
@@ -408,6 +422,9 @@ def build_status(results, artifacts, selfinfo, repo_count, wf_count):
         )
 
     icon = {"OK": "🟢", "WARN": "🟡", "FAIL": "🔴", "SKIP": "⚪"}
+
+    if heal_summary is not None and heal is not None:
+        L.extend(heal.render_status(heal_summary))
 
     if n_fail or n_warn:
         L.append("## 需要处理\n")
@@ -469,8 +486,12 @@ def build_status(results, artifacts, selfinfo, repo_count, wf_count):
     return "\n".join(L) + "\n"
 
 
-def build_report(results, artifacts):
+def build_report(results, artifacts, heal_summary=None):
     blocks = []
+    if heal_summary and heal is not None:
+        seg = heal.render_report(heal_summary)
+        if seg:
+            blocks.append(seg)
     for x in results:
         if x["status"] in ("FAIL", "WARN"):
             lt = x.get("last_sched") or x.get("last")
@@ -544,7 +565,31 @@ def main():
         artifacts.extend(ex.map(lambda a: check_artifact(*a), art_jobs))
 
     selfinfo = self_check()
-    status_md = build_status(results, artifacts, selfinfo, len(repos), wf_total)
+
+    # ---- 自愈（默认 off，不动作）----
+    # 放在生成看板之前，这样看板里能直接看到「本轮修了什么」。
+    # 任何异常都只警告，绝不影响巡检本身。
+    heal_summary = None
+    if heal is None:
+        heal_summary = {"level": "error", "note": "自愈模块未加载（scripts/heal.py 缺失或被改动）"}
+    else:
+        try:
+            heal_summary = heal.run(
+                results,
+                api=api,
+                owner=OWNER,
+                self_repo=SELF_REPO,
+                out_dir=OUT_DIR,
+            )
+            # 修过的目标加个标注：本次仍算异常（要等下一轮复核），但说明已处理
+            for x in results:
+                if f"{x.get('repo')}#{x.get('wf_id')}" in heal_summary["healed_keys"]:
+                    x["notes"].append("**本轮已自愈，下次巡检复核**")
+        except Exception as e:  # noqa: BLE001
+            print(f"[heal] 自愈模块异常，已跳过：{type(e).__name__}: {e}", file=sys.stderr)
+            heal_summary = {"level": "error", "note": f"{type(e).__name__}: {e}"}
+
+    status_md = build_status(results, artifacts, selfinfo, len(repos), wf_total, heal_summary)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(os.path.join(OUT_DIR, "STATUS.md"), "w", encoding="utf-8") as f:
@@ -560,7 +605,7 @@ def main():
     if bad:
         report = (
             f"自动巡检发现 **{len(bad)}** 项需要处理（其中 🔴 异常 {len(hard)} 项）。\n\n"
-            + build_report(results, artifacts)
+            + build_report(results, artifacts, heal_summary)
             + "\n**处理提示**\n"
             "- **静默停摆**：`schedule` 在 fork 仓库上会被 GitHub 周期性停用（状态仍显示 active，极隐蔽）。"
             "到该仓库 Actions 页面确认，或改用外部定时器调 `workflow_dispatch`。\n"

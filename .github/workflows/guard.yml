@@ -16,8 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # 提交 STATUS.md
+  contents: write   # 提交 STATUS.md / 自愈状态
   issues: write     # 开/关告警 Issue
+  actions: write    # 自愈：enable 被静默停用的 workflow
 
 jobs:
   guard:
@@ -41,6 +42,14 @@ jobs:
           GH_OWNER: ${{ github.repository_owner }}
           # 没配这个 secret 会降级成匿名模式（只扫公开仓库）
           GH_PAT: ${{ secrets.GH_PAT }}
+          # ---- 自愈档位 ----
+          # off     只报告，什么都不改（默认，最安全）
+          # dry-run 只输出「本该修什么」，不发写请求 —— 建议先跑一周看看
+          # safe    自动 enable 被 GitHub 静默停用的 workflow
+          # full    safe + 对「挂着却不触发」的定时器 disable→enable
+          FIX_LEVEL: ${{ vars.FIX_LEVEL || 'off' }}
+          FIX_MAX_PER_RUN: '3'
+          FIX_MAX_PER_TARGET: '3'
         run: python scripts/guard.py
 
       - name: 提交看板
@@ -48,6 +57,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add STATUS.md
+          if [ -f heal_state.json ]; then git add heal_state.json; fi
+          if [ -f heal_log.md ]; then git add heal_log.md; fi
           if git diff --cached --quiet; then
             echo "看板内容无变化，跳过提交"
             exit 0

@@ -16,6 +16,39 @@
 
 产出两样东西：`STATUS.md` 状态看板（自动提交），有异常时开 Issue 报警。
 
+## 发现异常之后：自愈（可选）
+
+默认**关着**。开启后，它能自动修一件事：**把被 GitHub 停掉/挂死的定时器重新挂上**。
+
+| 故障 | 自愈做什么 | 需要档位 |
+|---|---|---|
+| workflow 被 GitHub 静默停用（`state=disabled_inactivity`，仓库长期无活动导致） | `PUT .../enable` 重新启用 | `safe` |
+| 状态还是 `active`，但定时器已超期不再触发 | `disable → enable` 重置定时器 | `full` |
+
+**它故意不碰的东西**：跑失败的 workflow、产物不新鲜的、仓库归档的、代码有 bug 的。这些的原因在代码或上游数据里，机器人乱改只会把小问题变成大问题。所以自愈只做「不执行对方代码」的动作——重新挂定时器，不跑任何脚本、不改任何文件。
+
+### 三档 + 一个演练档
+
+`Settings → Secrets and variables → Actions → **Variables** → New repository variable`，名字 `FIX_LEVEL`：
+
+| 值 | 行为 |
+|---|---|
+| `off` | 默认。只报告，一个写请求都不发 |
+| `dry-run` | **建议先跑这个**。算出「本该修什么」写进看板和日志，但不执行 |
+| `safe` | 自动启用被静默停用的 workflow |
+| `full` | safe + 重置「挂着却不触发」的定时器 |
+
+不设这个变量就是 `off`，fork 的人什么都不用管。
+
+### 四条护栏
+
+1. **留痕**：每次实际动作追加进 `heal_log.md`，看板里有「自愈」一节，Issue 正文也会写。修了什么、什么时候修的，都能翻。
+2. **限频**：单轮最多修 3 个目标（`FIX_MAX_PER_RUN`）；同一目标 7 天内最多试 3 次（`FIX_MAX_PER_TARGET`），超了不再修，标成「需人工」——防止和 GitHub 死磕。
+3. **不自杀**：巡检器自己所在的仓库永远不自动修。它不运行就没人来修它，只能人工点。
+4. **改错不生效**：`FIX_LEVEL` 拼错（比如 `saf`）一律降级成 `off`，不会因为手滑就乱动你的仓库。
+
+修过的目标当轮仍记为异常（要等下一轮巡检复核它是否真的活了），只是会多一句「本轮已自愈，下次巡检复核」。
+
 ## 怎么用
 
 ### 方式一：fork 后直接用（覆盖公开仓库，零配置）
@@ -95,13 +128,17 @@ db-sync / Guard   →  每天盯一次 repo-guard 是否还活着
 
 ```bash
 GH_PAT=<your_token> GH_OWNER=<your_name> python scripts/guard.py
+# 想顺带看自愈会做什么（不发写请求）：
+GH_PAT=<your_token> GH_OWNER=<your_name> FIX_LEVEL=dry-run python scripts/guard.py
 ```
 
 Windows / 沙箱环境如果设了 `http_proxy`，urllib 可能被代理隧道卡死（curl 走同一代理却正常）。脚本默认忽略环境代理直连；确实需要走代理时加 `GH_USE_PROXY=1`。
 
 ## 已知限制
 
-- **巡检器自己也可能被静默停用**。建议让另一个仓库的 workflow 反向盯这个仓库（取最近一次 run 的时间），形成互锁。
+- **巡检器自己也可能被静默停用**。建议让另一个仓库的 workflow 反向盯这个仓库（取最近一次 run 的时间），形成互锁。自愈也修不了它自己——它不跑就没人来修它。
+- **自愈只修定时器，不修代码**。workflow 连续失败说明脚本或上游真有问题，那得看日志，不是 re-enable 能解决的。
+- 自愈需要 workflow 的 `actions: write` 权限（本仓库 `.github/workflows/guard.yml` 已声明）；用 PAT 模式时 token 还得有 `workflow` scope，否则会报 403。
 - 匿名模式下仓库多会触及 60 次/小时限额，脚本会提前截断并在看板标注「请求预算用尽」。
 - 只能检查 GitHub 侧状态，管不了代码逻辑对不对、产物内容是否正确。
 - 公开仓库的 workflow 会被读 cron，如果你的仓库是私有的且没配 PAT，会读不到。
