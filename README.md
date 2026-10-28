@@ -71,9 +71,31 @@ PERIOD_OVERRIDE = {
 
 ## 判定口径
 
+- **停摆只看 `schedule` 触发的运行**。手动跑（`workflow_dispatch`）不算数——否则每周手点一次就能掩盖定时任务已死，这是最容易自欺的地方。
 - **停摆阈值** = `max(2 × 预期周期, 预期周期 + 6h)`。周期从 cron 推算：`*/N * * * *` → N 小时；`0 H * * *` → 24 小时；带星期/日期字段按周/月折算。
+- **宽限期**：workflow 创建不满 2 天且尚未定时触发过的，跳过不报（刚建好还没轮到第一次 cron 是正常的）。
+- **不算故障的状态**：`disabled_manually`（你自己关的）、`disabled_fork`（fork 默认禁用）、从未运行且无定时器（纯手动工作流）——统统归为 ⚪ 跳过。
 - 连续 2 次 `failure` 判 🔴；最近 1 次失败或 10 次内失败 ≥3 次判 🟡。
-- 退出码 1 表示有 🔴 异常，但 workflow 会先执行完提交看板和开 Issue，再定结论。
+- 退出码 1 表示有 🔴 异常。**workflow 显示红色叉是告警信号，不是脚本坏了**——它会先提交看板、开 Issue，最后才定结论。
+
+## 架构：为什么要互锁
+
+巡检器自己也依赖 GitHub 的 schedule，同样会被静默停用。所以需要两个仓库互相盯：
+
+```
+repo-guard        →  每 6 小时巡检所有仓库（含 db-sync 的 Guard）
+db-sync / Guard   →  每天盯一次 repo-guard 是否还活着
+```
+
+任一方停摆，另一方都能发现。建议 fork 后照这个模式，在你最活跃的那个仓库里放一个只负责「检查本仓库最近一次运行时间」的小 workflow 当守门人。
+
+## 本地运行（可选）
+
+```bash
+GH_PAT=<your_token> GH_OWNER=<your_name> python scripts/guard.py
+```
+
+Windows / 沙箱环境如果设了 `http_proxy`，urllib 可能被代理隧道卡死（curl 走同一代理却正常）。脚本默认忽略环境代理直连；确实需要走代理时加 `GH_USE_PROXY=1`。
 
 ## 已知限制
 
