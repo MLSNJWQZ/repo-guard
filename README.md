@@ -1,6 +1,8 @@
-# repo-guard
+# repo-guard · 仓库哨兵
 
 自动巡检**你名下所有仓库**的 GitHub Actions 健康度。不用维护监控名单——加新仓库、加新 workflow，下次巡检自动发现。
+
+> 中文名「仓库哨兵」：`repo` = repository（仓库），`guard` = 守卫。GitHub 不允许仓库名用中文，所以英文链接名固定为 `repo-guard`，中文标识放在这里和仓库简介里。
 
 ## 它能抓什么
 
