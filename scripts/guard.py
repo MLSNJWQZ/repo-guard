@@ -365,10 +365,14 @@ def check_artifact(repo, path, max_age_h, label):
 
 
 def self_check():
-    runs = api(f"/repos/{OWNER}/{SELF_REPO}/actions/workflows/guard.yml/runs?per_page=3")
+    runs = api(f"/repos/{OWNER}/{SELF_REPO}/actions/workflows/guard.yml/runs?per_page=5")
     if not ok(runs) or not runs.get("workflow_runs"):
         return {"status": "WARN", "age_h": None, "notes": ["读不到自身运行记录"]}
-    r = runs["workflow_runs"][0]
+    # 只取已完成的，否则会读到「正在跑的这一轮」，结论永远是空的
+    done = [r for r in runs["workflow_runs"] if (r.get("status") or "") == "completed"]
+    if not done:
+        return {"status": "WARN", "age_h": None, "conclusion": None, "notes": ["没有已完成的运行"]}
+    r = done[0]
     dt = parse_dt(r.get("created_at"))
     age_h = (now_utc() - dt).total_seconds() / 3600 if dt else None
     return {"status": "OK", "age_h": age_h, "last": dt, "conclusion": r.get("conclusion")}
