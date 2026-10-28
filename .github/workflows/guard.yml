@@ -1,0 +1,94 @@
+name: Repo Guard - 全仓库巡检
+
+# fork 后必读：GitHub 默认禁用 fork 仓库的 schedule，
+# 首次进来请到 Actions 页面点「I understand my workflows, go ahead and re-enable them」。
+
+on:
+  schedule:
+    # 每 6 小时一次，故意错开整点（整点最拥挤，容易被延迟或丢弃）
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: repo-guard
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 提交 STATUS.md
+  issues: write     # 开/关告警 Issue
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 巡检
+        # 退出码 1 只代表「有异常」，不中断流程，后面还要提交看板、开 Issue
+        continue-on-error: true
+        env:
+          # fork 后自动变成你自己的账号名，无需改代码
+          GH_OWNER: ${{ github.repository_owner }}
+          # 没配这个 secret 会降级成匿名模式（只扫公开仓库）
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: python scripts/guard.py
+
+      - name: 提交看板
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STATUS.md
+          if git diff --cached --quiet; then
+            echo "看板内容无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: 更新巡检看板 $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push
+
+      - name: 异常开 Issue / 恢复关闭
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="巡检告警：有仓库需要处理"
+          open_n=$(gh issue list --search "巡检告警 in:title state:open" \
+            --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -f guard_report.md ]; then
+            echo "发现异常，报告长度 $(wc -c < guard_report.md) 字节"
+            if [ -n "$open_n" ]; then
+              echo "追加到已有 Issue #$open_n"
+              gh issue comment "$open_n" --body-file guard_report.md
+            else
+              echo "新建 Issue"
+              gh issue create --title "$TITLE" --body-file guard_report.md
+            fi
+          else
+            echo "巡检全部正常"
+            if [ -n "$open_n" ]; then
+              gh issue close "$open_n" --comment "巡检恢复正常，自动关闭。"
+            fi
+          fi
+
+      - name: 把看板写进运行摘要
+        if: always()
+        run: |
+          if [ -f STATUS.md ]; then
+            cat STATUS.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 按巡检结果定结论
+        run: |
+          if [ -f guard_report.md ]; then
+            echo "::error::巡检发现异常，详情见 Issue 与 STATUS.md"
+            exit 1
+          fi
+          echo "全部正常"
