@@ -1,7 +1,7 @@
 # 仓库巡检看板
 
-> 最后巡检：**2026-10-28 13:50 UTC**
-> 巡检器自身：上次运行 1 分钟前，结论 `failure`
+> 最后巡检：**2026-10-28 13:58 UTC**
+> 巡检器自身：上次运行 0 分钟前，结论 `failure`
 > 模式：🔓 **PAT 模式**：覆盖全部仓库（含私有）
 > 覆盖：**6** 个仓库 / **15** 个 workflow ｜ 本次请求 35 次
 
@@ -30,7 +30,7 @@
 | 🟢 | `dongguaTV` | Android Build & Release | 无定时器 | 10-18 16:07 | 9.9 天 | `success` |
 | 🟢 | `dongguaTV` | Sync db.json (from db-sync) | 每天 | 10-28 10:03 | 4 小时 | `success` |
 | 🟢 | `dongguaTV` | Docker Build & Publish | 无定时器 | 10-18 15:48 | 9.9 天 | `success` |
-| 🟢 | `dongguaTV` | 上游更新提醒 | 每天 | 10-28 06:25 | 7 小时 | `success` |
+| 🟢 | `dongguaTV` | 上游更新提醒 | 每天 | 10-28 06:25 | 8 小时 | `success` |
 | 🟢 | `lxmusic` | Auto Sync & Keep Alive | 每天 | 10-28 07:50 | 6 小时 | `success` |
 | 🟢 | `lxmusic` | 音源可用性检查 | 每天 | 10-27 21:05 | 17 小时 | `success` |
 | ⚪ | `lxmusic` | Star History | — | — | — | `—` |
@@ -42,7 +42,7 @@
 | | 仓库 | 文件 | 说明 | 最后提交 | 距今 |
 |---|---|---|---|---|---|
 | 🟢 | `db-sync` | `db.json` | 站点库 | 10-28 09:30 | 4 小时 |
-| 🟢 | `dongguaTV` | `db.json` | 站点库 | 10-27 09:23 | 28 小时 |
+| 🟢 | `dongguaTV` | `db.json` | 站点库 | 10-27 09:23 | 29 小时 |
 
 ---
 判定口径：以 workflow 自身 cron 推算预期周期，超过 `max(2×周期, 周期+6h)` 未触发即判停摆；连续 2 次失败判异常。本文件由 `scripts/guard.py` 自动生成，勿手改。
