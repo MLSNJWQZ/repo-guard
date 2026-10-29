@@ -35,6 +35,7 @@ jobs:
           python-version: '3.12'
 
       - name: 巡检
+        id: guard
         # 退出码 1 只代表「有异常」，不中断流程，后面还要提交看板、开 Issue
         continue-on-error: true
         env:
@@ -96,10 +97,11 @@ jobs:
             cat STATUS.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # 红色只对应巡检脚本的退出码（有 🔴 异常）；🟡 留意项只开 Issue、不把运行标红
       - name: 按巡检结果定结论
         run: |
-          if [ -f guard_report.md ]; then
-            echo "::error::巡检发现异常，详情见 Issue 与 STATUS.md"
+          if [ "${{ steps.guard.outcome }}" = "failure" ]; then
+            echo "::error::巡检发现 🔴 异常，详情见 Issue 与 STATUS.md"
             exit 1
           fi
-          echo "全部正常"
+          echo "无 🔴 异常（🟡 留意项见看板）"
