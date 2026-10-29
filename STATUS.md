@@ -1,7 +1,7 @@
 # 仓库巡检看板
 
-> 最后巡检：**2026-10-29 10:12 UTC**
-> 巡检器自身：上次运行 6 分钟前，结论 `failure`
+> 最后巡检：**2026-10-29 10:13 UTC**
+> 巡检器自身：上次运行 1 分钟前，结论 `success`
 > 模式：🔓 **PAT 模式**：覆盖全部仓库（含私有）
 > 覆盖：**6** 个仓库 / **15** 个 workflow ｜ 本次请求 35 次
 
@@ -33,7 +33,7 @@
 | ⚪ | `cf-speed-dns` | Cloudflare IP 优选并自动更新DNS (域名2) | — | — | — | `—` |
 | 🟢 | `db-sync` | Guard - 巡检定时任务存活（互锁） | 每天 | 10-29 06:21 | 4 小时 | `success` |
 | ⚪ | `db-sync` | keepalive | 每月 1 次 | — | — | `—` |
-| 🟢 | `db-sync` | sync-db | 每天 | 10-29 09:41 | 31 分钟 | `success` |
+| 🟢 | `db-sync` | sync-db | 每天 | 10-29 09:41 | 32 分钟 | `success` |
 | 🟢 | `dongguaTV` | Android Build & Release | 无定时器 | 10-28 16:37 | 18 小时 | `success` |
 | 🟢 | `dongguaTV` | Sync db.json (from db-sync) | 每天 | 10-28 10:03 | 24 小时 | `success` |
 | 🟢 | `dongguaTV` | Docker Build & Publish | 无定时器 | 10-18 15:48 | 10.8 天 | `success` |
