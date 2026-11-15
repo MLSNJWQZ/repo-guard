@@ -1,7 +1,7 @@
 # 仓库巡检看板
 
-> 最后巡检：**2026-11-14 22:26 UTC**
-> 巡检器自身：上次运行 4 小时前，结论 `failure`
+> 最后巡检：**2026-11-15 06:36 UTC**
+> 巡检器自身：上次运行 8 小时前，结论 `failure`
 > 模式：🔓 **PAT 模式**：覆盖全部仓库（含私有）
 > 覆盖：**8** 个仓库 / **15** 个 workflow ｜ 本次请求 37 次
 
@@ -22,34 +22,34 @@
 | 级别 | 仓库 | 工作流 / 文件 | 最后定时触发 | 周期 | 说明 |
 |---|---|---|---|---|---|
 | 🟡 | `lxmusic` | Auto Sync & Keep Alive | 11-14 08:28 | 每天 | 最近 30 次里失败 3 次 |
-| 🔴 | `dongguaTV` | `db.json`（站点库） | 11-04 16:48 | — | 10.2 天 没更新（阈值 96h）→ 跑了但没产出 |
+| 🔴 | `dongguaTV` | `db.json`（站点库） | 11-04 16:48 | — | 10.6 天 没更新（阈值 96h）→ 跑了但没产出 |
 
 ## 全部工作流
 
 | | 仓库 | 工作流 | 周期 | 最后定时触发 | 距今 | 最近结论 |
 |---|---|---|---|---|---|---|
-| 🟡 | `lxmusic` | Auto Sync & Keep Alive | 每天 | 11-14 08:28 | 14 小时 | `success` |
-| 🟢 | `cf-speed-dns` | dns_both_push | 每 6 小时 | 11-14 22:03 | 23 分钟 | `success` |
-| 🟢 | `cf-speed-dns` | Keep Repo Alive | 每月 1 次 | 11-01 10:03 | 13.5 天 | `success` |
+| 🟡 | `lxmusic` | Auto Sync & Keep Alive | 每天 | 11-14 08:28 | 22 小时 | `success` |
+| 🟢 | `cf-speed-dns` | dns_both_push | 每 6 小时 | 11-15 05:21 | 1 小时 | `success` |
+| 🟢 | `cf-speed-dns` | Keep Repo Alive | 每月 1 次 | 11-01 10:03 | 13.9 天 | `success` |
 | ⚪ | `cf-speed-dns` | Cloudflare IP 优选并自动更新DNS (域名2) | — | — | — | `—` |
-| 🟢 | `db-sync` | Guard - 巡检定时任务存活（互锁） | 每天 | 11-14 06:56 | 16 小时 | `success` |
-| 🟢 | `db-sync` | keepalive | 每月 1 次 | 11-01 11:09 | 13.5 天 | `success` |
-| 🟢 | `db-sync` | sync-db | 每天 | 11-14 09:58 | 12 小时 | `success` |
-| 🟢 | `dongguaTV` | Android Build & Release | 无定时器 | 11-04 17:10 | 10.2 天 | `success` |
-| 🟢 | `dongguaTV` | Docker Build & Publish | 无定时器 | 10-29 16:07 | 16.3 天 | `success` |
-| 🟢 | `dongguaTV` | 上游更新提醒 | 每天 | 11-14 07:27 | 15 小时 | `success` |
-| 🟢 | `lxmusic` | 音源可用性检查 | 每天 | 11-14 21:03 | 1 小时 | `success` |
-| 🟢 | `lxmusic` | Star History | 每天 | 11-14 07:38 | 15 小时 | `success` |
-| 🟢 | `lxmusic` | pages-build-deployment | 无定时器 | 11-08 08:29 | 6.6 天 | `success` |
-| 🟢 | `pano-landing` | pages-build-deployment | 无定时器 | 11-01 07:32 | 13.6 天 | `success` |
+| 🟢 | `db-sync` | Guard - 巡检定时任务存活（互锁） | 每天 | 11-14 06:56 | 24 小时 | `success` |
+| 🟢 | `db-sync` | keepalive | 每月 1 次 | 11-01 11:09 | 13.8 天 | `success` |
+| 🟢 | `db-sync` | sync-db | 每天 | 11-14 09:58 | 21 小时 | `success` |
+| 🟢 | `dongguaTV` | Android Build & Release | 无定时器 | 11-04 17:10 | 10.6 天 | `success` |
+| 🟢 | `dongguaTV` | Docker Build & Publish | 无定时器 | 10-29 16:07 | 16.6 天 | `success` |
+| 🟢 | `dongguaTV` | 上游更新提醒 | 每天 | 11-14 07:27 | 23 小时 | `success` |
+| 🟢 | `lxmusic` | 音源可用性检查 | 每天 | 11-14 21:03 | 10 小时 | `success` |
+| 🟢 | `lxmusic` | Star History | 每天 | 11-14 07:38 | 23 小时 | `success` |
+| 🟢 | `lxmusic` | pages-build-deployment | 无定时器 | 11-08 08:29 | 6.9 天 | `success` |
+| 🟢 | `pano-landing` | pages-build-deployment | 无定时器 | 11-01 07:32 | 14.0 天 | `success` |
 | ⚪ | `tvbox-source-aggregator` | Build & Push Multi-Arch Docker Image | — | — | — | `—` |
 
 ## 产物新鲜度
 
 | | 仓库 | 文件 | 说明 | 最后提交 | 距今 |
 |---|---|---|---|---|---|
-| 🟢 | `db-sync` | `db.json` | 站点库 | 11-14 10:00 | 12 小时 |
-| 🔴 | `dongguaTV` | `db.json` | 站点库 | 11-04 16:48 | 10.2 天 |
+| 🟢 | `db-sync` | `db.json` | 站点库 | 11-14 10:00 | 21 小时 |
+| 🔴 | `dongguaTV` | `db.json` | 站点库 | 11-04 16:48 | 10.6 天 |
 
 ## 未纳入巡检
 
