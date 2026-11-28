@@ -1,52 +1,20 @@
 # 仓库巡检看板
 
-> 最后巡检：**2026-11-28 07:52 UTC**
-> 巡检器自身：上次运行 11 小时前，结论 `failure`
-> 模式：🔓 **PAT 模式**：覆盖全部仓库（含私有）
-> 覆盖：**8** 个仓库 / **15** 个 workflow ｜ 本次请求 37 次
+> 最后尝试：**2026-11-28 20:07 UTC**
+> 模式：🔓 PAT 模式
 
-## 总览：🟢 全部正常
+## 总览：⚫ 本轮未完成
 
-🟢 正常 13 ｜ 🟡 留意 0 ｜ 🔴 异常 0 ｜ ⚪ 跳过 2
+原因：`列出仓库失败：HTTP 401 Unauthorized {
+  "message": "Bad credentials",
+  "documentation_url": "https://docs.github.com/rest",
+  "status": "401"
+}`
 
-> ⚪ 跳过＝按预期不运行，不算故障：手动禁用的、fork 仓库默认禁用的、纯手动触发从未跑过的、以及刚建还没到首个触发周期的。
+PAT 模式仍失败，通常是 **token 过期 / 权限不足 / GitHub 临时故障**。
 
-## 自愈
+检查：PAT 是否勾了 `repo`（或细粒度 token 的 Administration/Actions/Contents 只读）、是否已过期、`GH_PAT` secret 是否写错。
 
-> 🧪 **dry-run 演练**（只决策，不发写请求） ｜ 命中 0 项 ｜ 可自动修 0 ｜ 需人工 0 ｜ 顺延 0
-
-> 本轮没有需要自愈的目标。
-
-## 全部工作流
-
-| | 仓库 | 工作流 | 周期 | 最后定时触发 | 距今 | 最近结论 |
-|---|---|---|---|---|---|---|
-| 🟢 | `cf-speed-dns` | dns_both_push | 每 6 小时 | 11-28 06:46 | 1 小时 | `success` |
-| 🟢 | `cf-speed-dns` | Keep Repo Alive | 每月 1 次 | 11-01 10:03 | 26.9 天 | `success` |
-| ⚪ | `cf-speed-dns` | Cloudflare IP 优选并自动更新DNS (域名2) | — | — | — | `—` |
-| 🟢 | `db-sync` | Guard - 巡检定时任务存活（互锁） | 每天 | 11-27 08:58 | 23 小时 | `success` |
-| 🟢 | `db-sync` | keepalive | 每月 1 次 | 11-01 11:09 | 26.9 天 | `success` |
-| 🟢 | `db-sync` | sync-db | 每天 | 11-27 11:55 | 20 小时 | `success` |
-| 🟢 | `dongguaTV` | Android Build & Release | 无定时器 | 11-04 17:10 | 23.6 天 | `success` |
-| 🟢 | `dongguaTV` | Docker Build & Publish | 无定时器 | 10-29 16:07 | 29.7 天 | `success` |
-| 🟢 | `dongguaTV` | 上游更新提醒 | 每天 | 11-27 09:29 | 22 小时 | `success` |
-| 🟢 | `lxmusic` | Auto Sync & Keep Alive | 每天 | 11-27 10:27 | 21 小时 | `success` |
-| 🟢 | `lxmusic` | 音源可用性检查 | 每天 | 11-28 00:19 | 8 小时 | `success` |
-| 🟢 | `lxmusic` | Star History | 每天 | 11-27 09:43 | 22 小时 | `success` |
-| 🟢 | `lxmusic` | pages-build-deployment | 无定时器 | 11-26 10:21 | 46 小时 | `success` |
-| 🟢 | `pano-landing` | pages-build-deployment | 无定时器 | 11-01 07:32 | 27.0 天 | `success` |
-| ⚪ | `tvbox-source-aggregator` | Build & Push Multi-Arch Docker Image | — | — | — | `—` |
-
-## 产物新鲜度
-
-| | 仓库 | 文件 | 说明 | 最后提交 | 距今 |
-|---|---|---|---|---|---|
-| 🟢 | `db-sync` | `db.json` | 站点库 | 11-27 11:57 | 20 小时 |
-| 🔴 | `dongguaTV` | `db.json` | 站点库 | 11-04 16:48 | 23.6 天 |
-
-## 未纳入巡检
-
-- `dsh-purge`：没有配置任何 workflow
 
 ---
-判定口径：以 workflow 自身 cron 推算预期周期，超过 `max(2×周期, 周期+6h)` 未触发即判停摆；连续 2 次失败判异常。本文件由 `scripts/guard.py` 自动生成，勿手改。
+> 这一轮**不算任何仓库的故障**——是巡检自己的请求被拦下了，下一轮会自动重试。本文件由 `scripts/guard.py` 自动生成，勿手改。
